@@ -14,3 +14,7 @@ Copy Trade - REST API service for automated trading on the Binance exchange, pro
 - Mechanism for copying trading operations between accounts
 - REST API interface for service interaction
 - Integration with Binance exchange
+
+
+## API Endpoints
+![API Schema](https://raw.githubusercontent.com/romnatson3/copy_trade/refs/heads/master/api_schema.png)
