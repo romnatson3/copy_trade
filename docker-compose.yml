@@ -1,0 +1,216 @@
+volumes:
+  copy_trade_postgres:
+  copy_trade_redis:
+  copy_trade_static:
+  copy_trade_rabbitmq:
+  copy_trade_logs:
+  # copy_trade_logs_web:
+  # copy_trade_logs_default:
+  # copy_trade_logs_binance:
+  # copy_trade_logs_ws_binance_market_price:
+  # copy_trade_logs_ws_binance_user_data:
+
+networks:
+  layer:
+    driver: bridge
+
+services:
+  web:
+    image: copy_trade:latest
+    deploy:
+      mode: replicated
+      replicas: 1
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: /app/wait-for-it.sh -q -s -h postgres -p 5432 -- /app/entrypoint.sh
+    restart: always
+    volumes:
+      - copy_trade_static:/app/static
+      # - copy_trade_logs_web:/app/logs
+      - copy_trade_logs:/app/logs
+    networks:
+      - layer
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    logging:
+      driver: 'none'
+
+  rabbitmq:
+    image: rabbitmq:management
+    env_file:
+      - .env
+    volumes:
+      - copy_trade_rabbitmq:/var/lib/rabbitmq
+    networks:
+      - layer
+    logging:
+      driver: 'none'
+
+  nginx:
+    image: nginx:latest
+    restart: always
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - copy_trade_static:/app/static:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - web
+    networks:
+      - layer
+    logging:
+      driver: syslog
+      options:
+        tag: copy_trade_nginx
+        syslog-facility: local5
+
+  postgres:
+    image: postgres:latest
+    command: postgres -c 'max_connections=2000'
+    env_file:
+      - .env
+    volumes:
+      - copy_trade_postgres:/var/lib/postgresql/data
+    networks:
+      - layer
+    logging:
+      driver: syslog
+      options:
+        tag: copy_trade_nginx
+        syslog-facility: local5
+
+  redis:
+    image: redis:latest
+    entrypoint: redis-server --appendonly yes --maxmemory-policy volatile-ttl --aof-use-rdb-preamble yes --save "" --maxclients 65000
+    volumes:
+      - copy_trade_redis:/data
+    networks:
+      - layer
+    logging:
+      driver: 'none'
+
+  # flower:
+  #   image: copy_trade:latest
+  #   entrypoint: /app/wait-for-it.sh -q -s -h rabbitmq -p 5672 -- celery -A copy_trade flower -l INFO --host=0.0.0.0 --port=5555
+  #   restart: always
+  #   env_file:
+  #     - .env
+  #   ports:
+  #     - "51455:5555"
+  #   depends_on:
+  #     - rabbitmq
+  #   networks:
+  #     - layer
+
+  beat:
+    image: copy_trade:latest
+    entrypoint: sh -c "sleep 5 && celery -A copy_trade beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler"
+    deploy:
+      mode: replicated
+      replicas: 1
+    restart: always
+    depends_on:
+      - web
+      - rabbitmq
+      - redis
+      - postgres
+      - default
+      - binance
+    env_file:
+      - .env
+    networks:
+      - layer
+    logging:
+      driver: 'none'
+
+  default:
+    image: copy_trade:latest
+    entrypoint: celery -A copy_trade worker -c 20 -l INFO -Q default
+    deploy:
+      mode: replicated
+      replicas: 1
+    restart: always
+    depends_on:
+      - rabbitmq
+      - redis
+      - postgres
+      - web
+    env_file:
+      - .env
+    volumes:
+      # - copy_trade_logs_default:/app/logs
+      - copy_trade_logs:/app/logs
+    networks:
+      - layer
+    logging:
+      driver: 'none'
+
+  binance:
+    image: copy_trade:latest
+    entrypoint: celery -A copy_trade worker -c 100 -l INFO -Q binance
+    deploy:
+      mode: replicated
+      replicas: 1
+    restart: always
+    depends_on:
+      - rabbitmq
+      - redis
+      - postgres
+      - web
+    env_file:
+      - .env
+    volumes:
+      # - copy_trade_logs_binance:/app/logs
+      - copy_trade_logs:/app/logs
+    networks:
+      - layer
+    logging:
+      driver: 'none'
+
+  websocket_binance_market_price:
+    image: copy_trade:latest
+    entrypoint: celery -A copy_trade worker -c 1 -l INFO -Q websocket_binance_market_price
+    deploy:
+      mode: replicated
+      replicas: 1
+    restart: always
+    depends_on:
+      - rabbitmq
+      - redis
+      - postgres
+      - web
+    env_file:
+      - .env
+    volumes:
+      # - copy_trade_logs_ws_binance_market_price:/app/logs
+      - copy_trade_logs:/app/logs
+    networks:
+      - layer
+    logging:
+      driver: 'none'
+
+  websocket_binance_user_data:
+    image: copy_trade:latest
+    entrypoint: celery -A copy_trade worker -c 1 -l INFO -Q websocket_binance_user_data
+    deploy:
+      mode: replicated
+      replicas: 1
+    restart: always
+    depends_on:
+      - rabbitmq
+      - redis
+      - postgres
+      - web
+    env_file:
+      - .env
+    volumes:
+      # - copy_trade_logs_ws_binance_user_data:/app/logs
+      - copy_trade_logs:/app/logs
+    networks:
+      - layer
+    logging:
+      driver: 'none'
